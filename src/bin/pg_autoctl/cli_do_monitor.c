@@ -171,6 +171,8 @@ keeper_cli_monitor_get_primary_node(int argc, char **argv)
 /*
  * keeper_cli_monitor_get_other_node contacts the pg_auto_failover monitor and
  * retrieves the "other node" information for given nodename and port.
+ *
+ * TODO: add a --json output, an array of NodeAddress objects.
  */
 static void
 keeper_cli_monitor_get_other_node(int argc, char **argv)
@@ -180,7 +182,10 @@ keeper_cli_monitor_get_other_node(int argc, char **argv)
 	bool pg_is_not_running_is_ok = true;
 
 	Monitor monitor = { 0 };
-	NodeAddress otherNode = { 0 };
+
+	/* arbitrary limit to 12 other nodes */
+	int nodeIndex = 0;
+	NodeAddressArray otherNodesArray;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -202,10 +207,11 @@ keeper_cli_monitor_get_other_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_get_other_node(&monitor,
-								config.nodename,
-								config.pgSetup.pgport,
-								&otherNode))
+	if (!monitor_get_other_nodes(&monitor,
+								 config.nodename,
+								 config.pgSetup.pgport,
+								 ANY_STATE,
+								 &otherNodesArray))
 	{
 		log_fatal("Failed to get the other node from the monitor, "
 				  "see above for details");
@@ -213,10 +219,15 @@ keeper_cli_monitor_get_other_node(int argc, char **argv)
 	}
 
 	/* output something easy to parse by another program */
-	fprintf(stdout,
-			"%s/%d %s:%d\n",
-			config.formation, config.groupId,
-			otherNode.host, otherNode.port);
+	for (nodeIndex = 0; nodeIndex < otherNodesArray.count; nodeIndex++)
+	{
+		NodeAddress otherNode = otherNodesArray.nodes[nodeIndex];
+
+		fprintf(stdout,
+				"%s/%d/%d %s:%d\n",
+				config.formation, config.groupId,
+				otherNode.nodeId, otherNode.host, otherNode.port);
+	}
 }
 
 
