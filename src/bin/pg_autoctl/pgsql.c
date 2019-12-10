@@ -1354,9 +1354,6 @@ validate_connection_string(const char *connectionString)
 /*
  * pgsql_get_postgres_metadata returns several bits of information that we need
  * to take decisions in the rest of the code:
- *
- *  - config_file path (cache invalidation in case it changed)
- *  - hba_file path (cache invalidation in case it changed)
  *  - pg_is_in_recovery (primary or standby, as expected?)
  *  - sync_state from pg_stat_replication when a primary
  *  - current_lsn from the server
