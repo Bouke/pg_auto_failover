@@ -184,6 +184,7 @@ bool pgsql_is_in_recovery(PGSQL *pgsql, bool *is_in_recovery);
 bool pgsql_reload_conf(PGSQL *pgsql);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose);
+bool pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose);
 bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);

@@ -648,6 +648,26 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
 
 
 /*
+ * pgsql_drop_replication_slots drops all the replication slots. If the verbose
+ * flag is false, then no info message will be logged.
+ */
+bool
+pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
+{
+	char *sql =
+		"SELECT pg_drop_replication_slot(slot_name) "
+		"  FROM pg_replication_slots ";
+
+	if (verbose)
+	{
+		log_info("Drop all replication slots");
+	}
+
+	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
+}
+
+
+/*
  * pgsql_enable_synchronous_replication enables synchronous replication
  * in Postgres such that all writes block post-commit until they are
  * replicated.
