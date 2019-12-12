@@ -706,7 +706,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		values[1] = CStringGetTextDatum(otherNode->nodeName);
 		values[2] = Int32GetDatum(otherNode->nodePort);
 		values[3] = LSNGetDatum(otherNode->reportedLSN);
-		values[4] = BoolGetDatum(IsInPrimaryState(otherNode));
+		values[4] = BoolGetDatum(CanTakeWritesInState(otherNode->reportedState));
 
 		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 		if (resultTypeClass != TYPEFUNC_COMPOSITE)

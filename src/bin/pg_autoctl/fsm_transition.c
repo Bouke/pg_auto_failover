@@ -414,20 +414,20 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 	 */
 	if (!config->monitorDisabled)
 	{
-		if (!monitor_get_other_nodes(monitor,
-									 config->nodename, pgSetup->pgport,
+		char *host = config->nodename;
+		int port = pgSetup->pgport;
+
+		if (!monitor_get_other_nodes(monitor, host, port,
 									 WAIT_STANDBY_STATE,
 									 &(keeper->otherNodes)))
 		{
 			if (other_node_missing_is_ok)
 			{
-				log_debug("There's no other node for %s:%d",
-						  config->nodename, pgSetup->pgport);
+				log_debug("There's no other node for %s:%d", host, port);
 			}
 			else
 			{
-				log_error("There's no other node for %s:%d",
-						  config->nodename, pgSetup->pgport);
+				log_error("There's no other node for %s:%d", host, port);
 			}
 			return other_node_missing_is_ok;
 		}
@@ -463,8 +463,14 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 			return false;
 		}
 
-		snprintf(replicationSlotName, BUFSIZE, "%s_%d",
-				 REPLICATION_SLOT_NAME_DEFAULT, otherNode->nodeId);
+		if (!postgres_sprintf_replicationSlotName(otherNode->nodeId,
+												  replicationSlotName, BUFSIZE))
+		{
+			/* that's highly unlikely... */
+			log_error("Failed to snprintf replication slot name for node %d",
+					  otherNode->nodeId);
+			return false;
+		}
 
 		if (!primary_create_replication_slot(postgres, replicationSlotName))
 		{
