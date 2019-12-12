@@ -35,8 +35,12 @@
 #include "pgsql.h"
 #include "state.h"
 
+static bool outputJSON = false;
+
+static int cli_do_monitor_get_other_nodes_getopts(int argc, char **argv);
+
 static void keeper_cli_monitor_get_primary_node(int argc, char **argv);
-static void keeper_cli_monitor_get_other_node(int argc, char **argv);
+static void keeper_cli_monitor_get_other_nodes(int argc, char **argv);
 static void keeper_cli_monitor_get_coordinator(int argc, char **argv);
 static void keeper_cli_monitor_register_node(int argc, char **argv);
 static void keeper_cli_monitor_node_active(int argc, char **argv);
@@ -51,13 +55,13 @@ static CommandLine monitor_get_primary_command =
 				 keeper_cli_getopt_pgdata,
 				 keeper_cli_monitor_get_primary_node);
 
-static CommandLine monitor_get_other_node_command =
-	make_command("other",
-				 "Get the other node from the pg_auto_failover group of nodename/port",
+static CommandLine monitor_get_other_nodes_command =
+	make_command("others",
+				 "Get the other nodes from the pg_auto_failover group of nodename/port",
 				 " [ --pgdata ]",
 				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_monitor_get_other_node);
+				 cli_do_monitor_get_other_nodes_getopts,
+				 keeper_cli_monitor_get_other_nodes);
 
 static CommandLine monitor_get_coordinator_command =
 	make_command("coordinator",
@@ -69,7 +73,7 @@ static CommandLine monitor_get_coordinator_command =
 
 static CommandLine *monitor_get_commands[] = {
 	&monitor_get_primary_command,
-	&monitor_get_other_node_command,
+	&monitor_get_other_nodes_command,
 	&monitor_get_coordinator_command,
 	NULL
 };
@@ -169,13 +173,156 @@ keeper_cli_monitor_get_primary_node(int argc, char **argv)
 
 
 /*
- * keeper_cli_monitor_get_other_node contacts the pg_auto_failover monitor and
+ * keeper_cli_monitor_state_getopts parses the command line options for the
+ * command `pg_autoctl show state`.
+ */
+static int
+cli_do_monitor_get_other_nodes_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	/* see comments in cli_common.c in function keeper_cli_getopt_pgdata() */
+	unsetenv("POSIXLY_CORRECT");
+
+	while ((c = getopt_long(argc, argv, "D:JVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		char *pgdata = getenv("PGDATA");
+
+		if (pgdata == NULL)
+		{
+			log_fatal("Failed to get PGDATA either from the environment "
+					  "or from --pgdata");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+
+	log_debug("Managing PostgreSQL installation at \"%s\"",
+			  options.pgSetup.pgdata);
+
+	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!file_exists(options.pathnames.config))
+	{
+		log_fatal("Expected configuration file does not exists: \"%s\"",
+				  options.pathnames.config);
+
+		if (!directory_exists(options.pgSetup.pgdata))
+		{
+			log_warn("HINT: Check your PGDATA setting: \"%s\"",
+					 options.pgSetup.pgdata);
+		}
+
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * keeper_cli_monitor_get_other_nodes contacts the pg_auto_failover monitor and
  * retrieves the "other node" information for given nodename and port.
  *
  * TODO: add a --json output, an array of NodeAddress objects.
  */
 static void
-keeper_cli_monitor_get_other_node(int argc, char **argv)
+keeper_cli_monitor_get_other_nodes(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	bool missing_pgdata_is_ok = true;
@@ -207,26 +354,36 @@ keeper_cli_monitor_get_other_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_get_other_nodes(&monitor,
-								 config.nodename,
-								 config.pgSetup.pgport,
-								 ANY_STATE,
-								 &otherNodesArray))
+	if (outputJSON)
 	{
-		log_fatal("Failed to get the other node from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
+		char json[BUFSIZE];
+
+		if (!monitor_get_other_nodes_as_json(&monitor,
+											 config.nodename,
+											 config.pgSetup.pgport,
+											 ANY_STATE,
+											 json, BUFSIZE))
+		{
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
+		fprintf(stdout, "%s\n", json);
 	}
-
-	/* output something easy to parse by another program */
-	for (nodeIndex = 0; nodeIndex < otherNodesArray.count; nodeIndex++)
+	else
 	{
-		NodeAddress otherNode = otherNodesArray.nodes[nodeIndex];
+		if (!monitor_get_other_nodes(&monitor,
+									 config.nodename,
+									 config.pgSetup.pgport,
+									 ANY_STATE,
+									 &otherNodesArray))
+		{
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
 
-		fprintf(stdout,
-				"%s/%d/%d %s:%d\n",
-				config.formation, config.groupId,
-				otherNode.nodeId, otherNode.host, otherNode.port);
+		(void) printNodeArray(&otherNodesArray);
 	}
 }
 
