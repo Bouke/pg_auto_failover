@@ -186,8 +186,7 @@ bool pgsql_reload_conf(PGSQL *pgsql);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose);
 bool pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose);
-bool pgsql_replication_slot_advance(PGSQL *pgsql,
-									const char *slotName, char *uptoLSN);
+bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
