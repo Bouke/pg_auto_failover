@@ -118,6 +118,28 @@
 	"Promoting a Citus Worker standby after having blocked writes " \
 	"from the coordinator."
 
+#define COMMENT_SECONDARY_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location received"
+
+#define COMMENT_REPORT_LSN_TO_PREP_PROMOTION \
+	"Stop traffic to primary, " \
+	"wait for it to finish draining."
+
+#define COMMENT_REPORT_LSN_TO_WAIT_FORWARD \
+	"Preparing to fetch missing WAL bits from another standby before promotion"
+
+#define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
+	"Fetching missing WAL bits from another standby before promotion"
+
+#define COMMENT_REPORT_LSN_TO_WAIT_CASCADE \
+	"Prepare replication for the failover candidate"
+
+#define COMMENT_REPORT_LSN_TO_CATCHINGUP \
+	"Switch replication to the new primary"
+
+#define COMMENT_WAIT_CASCADE_TO_CATCHINGUP \
+	"Switch replication to the new primary"
+
 /* *INDENT-OFF* */
 
 /*
@@ -246,6 +268,17 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ SECONDARY_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
 	{ CATCHINGUP_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
 	{ MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, &fsm_restart_standby },
+
+	/*
+	 * In case of multiple standbys, failover begins with reporting current LSN
+	 */
+	{ SECONDARY_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
+	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
+	{ REPORT_LSN_STATE, WAIT_FORWARD_STATE, COMMENT_REPORT_LSN_TO_WAIT_FORWARD, &fsm_wait_forward },
+	{ WAIT_FORWARD_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
+	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
+	{ REPORT_LSN_STATE, CATCHINGUP_STATE, COMMENT_REPORT_LSN_TO_CATCHINGUP, &fsm_follow_new_primary },
+	{ WAIT_CASCADE_STATE, CATCHINGUP_STATE, COMMENT_WAIT_CASCADE_TO_CATCHINGUP, &fsm_follow_new_primary },
 
 	/*
 	 * This is the end, my friend.

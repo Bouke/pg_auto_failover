@@ -240,16 +240,23 @@ List *
 AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
+	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return NIL;
+	}
+
+	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+										  pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId)
+		if (otherNode != NULL &&
+			otherNode->nodeId != pgAutoFailoverNode->nodeId)
 		{
 			otherNodesList = lappend(otherNodesList, otherNode);
 		}
@@ -268,16 +275,23 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 								  ReplicationState currentState)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
+	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return NIL;
+	}
+
+	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+										  pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId &&
+		if (otherNode != NULL &&
+			otherNode->nodeId != pgAutoFailoverNode->nodeId &&
 			IsCurrentState(otherNode, currentState))
 		{
 			otherNodesList = lappend(otherNodesList, otherNode);
@@ -289,7 +303,8 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 
 /*
- * FindFailoverNewStandbyNode returns the first node found in given list 
+ * FindFailoverNewStandbyNode returns the first node found in given list that
+ * is a new standby, so that we can process each standby one after the other.
  */
 AutoFailoverNode *
 FindFailoverNewStandbyNode(List *groupNodeList)
@@ -310,6 +325,76 @@ FindFailoverNewStandbyNode(List *groupNodeList)
 	}
 
 	return standbyNode;
+}
+
+
+/*
+ * FindMostAdvancedStandby returns the node in groupNodeList that has the most
+ * advanced LSN.
+ */
+AutoFailoverNode *
+FindMostAdvancedStandby(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	AutoFailoverNode *mostAdvancedNode = NULL;
+
+	/* find the standby for errdetail */
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (mostAdvancedNode == NULL ||
+			mostAdvancedNode->reportedLSN < node->reportedLSN)
+		{
+			mostAdvancedNode = node;
+		}
+	}
+
+	return mostAdvancedNode;
+}
+
+
+/*
+ * pgautofailover_node_candidate_priority_compare
+ *	  qsort comparator for sorting node lists by candidate priority
+ */
+static int
+pgautofailover_node_candidate_priority_compare(const void *a, const void *b)
+{
+	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
+	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
+	int cmp = node2->candidatePriority - node1->candidatePriority;
+
+	return cmp;
+}
+
+
+/*
+ * GroupListCandidates returns a list of nodes in groupNodeList that are all
+ * candidates for failover (those with AutoFailoverNode.candidatePriority > 0),
+ * sorted by candidatePriority.
+ */
+List *
+GroupListCandidates(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	List *candidateNodesList = NIL;
+	List *sortedNodeList =
+		list_qsort(groupNodeList,
+				   pgautofailover_node_candidate_priority_compare);
+
+	foreach(nodeCell, sortedNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->candidatePriority > 0)
+		{
+			candidateNodesList = lappend(candidateNodesList, node);
+		}
+	}
+	list_free(sortedNodeList);
+
+	return candidateNodesList;
 }
 
 
@@ -877,6 +962,28 @@ CanTakeWritesInState(ReplicationState state)
 		   state == REPLICATION_STATE_PRIMARY ||
 		   state == REPLICATION_STATE_WAIT_PRIMARY ||
 		   state == REPLICATION_STATE_JOIN_PRIMARY;
+}
+
+
+/*
+ * IsBeingPromoted returns whether a standby node is going through the process
+ * of a promotion.
+ */
+bool
+IsBeingPromoted(AutoFailoverNode *node)
+{
+	return node != NULL
+		&& (node->reportedState == REPLICATION_STATE_WAIT_FORWARD
+			|| node->goalState == REPLICATION_STATE_WAIT_FORWARD
+
+			|| node->reportedState == REPLICATION_STATE_FAST_FORWARD
+			|| node->goalState == REPLICATION_STATE_FAST_FORWARD
+
+			|| node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION
+			|| node->goalState == REPLICATION_STATE_PREPARE_PROMOTION
+
+			|| node->reportedState == REPLICATION_STATE_STOP_REPLICATION
+			|| node->goalState == REPLICATION_STATE_STOP_REPLICATION);
 }
 
 

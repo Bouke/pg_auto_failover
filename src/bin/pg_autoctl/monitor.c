@@ -1827,7 +1827,9 @@ monitor_get_notifications(Monitor *monitor)
 			/* errors are logged by parse_state_notification_message */
 			if (parse_state_notification_message(&notification))
 			{
-				log_info("New state for %s:%d in formation \"%s\": %s/%s",
+				log_info("New state for node %d (%s:%d) in formation \"%s\": "
+						 "%s/%s",
+						 notification.nodeId,
 						 notification.nodeName,
 						 notification.nodePort,
 						 notification.formationId,

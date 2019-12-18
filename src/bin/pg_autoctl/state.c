@@ -409,6 +409,26 @@ NodeStateToString(NodeState s)
 			return "join_primary";
 		}
 
+		case REPORT_LSN_STATE:
+		{
+			return "report_lsn";
+		}
+
+		case FAST_FORWARD_STATE:
+		{
+			return "fast_forward";
+		}
+
+		case WAIT_FORWARD_STATE:
+		{
+			return "wait_forward";
+		}
+
+		case WAIT_CASCADE_STATE:
+		{
+			return "wait_cascade";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -487,6 +507,22 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "join_primary") == 0)
 	{
 		return JOIN_PRIMARY_STATE;
+	}
+	else if(strcmp(str, "report_lsn") == 0)
+	{
+		return REPORT_LSN_STATE;
+	}
+	else if(strcmp(str, "fast_forward") == 0)
+	{
+		return FAST_FORWARD_STATE;
+	}
+	else if(strcmp(str, "wait_forward") == 0)
+	{
+		return WAIT_FORWARD_STATE;
+	}
+	else if(strcmp(str, "wait_cascade") == 0)
+	{
+		return WAIT_CASCADE_STATE;
 	}
 	else
 	{
