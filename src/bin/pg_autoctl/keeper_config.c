@@ -567,9 +567,6 @@ keeper_config_update(KeeperConfig *config, int nodeId, int groupId)
 		return false;
 	}
 
-	log_warn("keeper_config_update: backup directory = %s",
-			 config->backupDirectory);
-
 	return keeper_config_write_file(config);
 }
 
@@ -814,28 +811,47 @@ keeper_config_init_nodekind(KeeperConfig *config)
  * to ${PGDATA}/../backup/${nodename} by default. Adding the local nodename
  * makes it possible to run several instances of Postgres and pg_autoctl on the
  * same host, which is nice for development and testing scenarios.
+ *
+ * That said, when testing and maybe in other situations, it is custom to have
+ * all the nodes sit on the same machine, and all be "localhost". To avoid any
+ * double-usage of the backup directory, as soon as we have a nodeId we use
+ * ${PGDATA/../backup/node_${nodeId} instead.
  */
 static bool
 keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 {
+	char *pgdata = config->pgSetup.pgdata;
+	char subdirs[MAXPGPATH] = { 0 };
+	char backupDirectory[MAXPGPATH] = { 0 };
 	char absoluteBackupDirectory[PATH_MAX];
 
-	/* create the temporary backup directory at $pgdata/../backup */
-	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory))
-	{
-		char *pgdata = config->pgSetup.pgdata;
-		char subdirs[MAXPGPATH];
+	/* build the default nodename based backup directory path */
+	snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+	path_in_same_directory(pgdata, subdirs, backupDirectory);
 
-		/* when not yet registered, pre-set with nodename */
-		if (nodeId == -1)
+	/*
+	 * If the user didn't provide a backupDirectory and we're not registered
+	 * yet, just use the default value with the nodename. Don't even check it
+	 * now.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory) && nodeId <= 0)
+	{
+		strlcpy(config->backupDirectory, backupDirectory, MAXPGPATH);
+		return true;
+	}
+
+	/* if we didn't have a backup directory yet, set one */
+	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory)
+		|| strcmp(backupDirectory, config->backupDirectory) == 0)
+	{
+		/* we might be able to use the nodeId, better than the nodename */
+		if (nodeId > 0)
 		{
-			snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+			snprintf(subdirs, MAXPGPATH, "backup/node_%d", nodeId);
+			path_in_same_directory(pgdata, subdirs, backupDirectory);
 		}
-		else
-		{
-			snprintf(subdirs, MAXPGPATH, "backup/%d", nodeId);
-		}
-		path_in_same_directory(pgdata, subdirs, config->backupDirectory);
+
+		strlcpy(config->backupDirectory, backupDirectory, MAXPGPATH);
 	}
 
 	/*
