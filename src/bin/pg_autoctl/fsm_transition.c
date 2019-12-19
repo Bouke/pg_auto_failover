@@ -38,7 +38,9 @@
 #include "primary_standby.h"
 #include "state.h"
 
-static bool prepare_replication(Keeper *keeper, bool other_node_missing_is_ok);
+static bool prepare_replication(Keeper *keeper,
+								NodeState otherNodeState,
+								bool otherNodeMissingIsOk);
 
 
 /*
@@ -376,7 +378,7 @@ bool
 fsm_prepare_replication(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	bool other_node_missing_is_ok = false;
+	bool otherNodeMissingIsOk = false;
 
 	if (IS_EMPTY_STRING_BUFFER(config->nodename))
 	{
@@ -386,7 +388,7 @@ fsm_prepare_replication(Keeper *keeper)
 		return false;
 	}
 
-	return prepare_replication(keeper, other_node_missing_is_ok);
+	return prepare_replication(keeper, WAIT_STANDBY_STATE, otherNodeMissingIsOk);
 }
 
 
@@ -397,7 +399,8 @@ fsm_prepare_replication(Keeper *keeper)
  * transition after all.
  */
 static bool
-prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
+prepare_replication(Keeper *keeper,
+					NodeState otherNodeState, bool otherNodeMissingIsOk)
 {
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
@@ -418,18 +421,32 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 		int port = pgSetup->pgport;
 
 		if (!monitor_get_other_nodes(monitor, host, port,
-									 WAIT_STANDBY_STATE,
+									 otherNodeState,
 									 &(keeper->otherNodes)))
 		{
-			if (other_node_missing_is_ok)
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeper->otherNodes.count == 0)
+		{
+			int logLevel = otherNodeMissingIsOk ? LOG_WARN : LOG_ERROR;
+
+			if (otherNodeState == ANY_STATE)
 			{
-				log_debug("There's no other node for %s:%d", host, port);
+				log_at_level(logLevel,
+							 "There's no other node for %s:%d", host, port);
 			}
 			else
 			{
-				log_error("There's no other node for %s:%d", host, port);
+				log_at_level(logLevel,
+							 "There's no other node in state \"%s\" "
+							 "for node %s:%d",
+							 NodeStateToString(otherNodeState),
+							 host, port);
 			}
-			return other_node_missing_is_ok;
+
+			return otherNodeMissingIsOk;
 		}
 	}
 
@@ -790,7 +807,7 @@ bool
 fsm_promote_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	bool other_node_missing_is_ok = true;
+	bool otherNodeMissingIsOk = true;
 
 	if (!ensure_local_postgres_is_running(postgres))
 	{
@@ -815,9 +832,9 @@ fsm_promote_standby(Keeper *keeper)
 	 * be able to open a replication connection. We therefore need to do the
 	 * same steps we take when going from single to wait_primary, namely to
 	 * create a replication slot and add the other node to pg_hba.conf. These
-	 * steps are implemented in fsm_prepare_replication.
+	 * steps are implemented in prepare_replication.
 	 */
-	if (!prepare_replication(keeper, other_node_missing_is_ok))
+	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE, otherNodeMissingIsOk))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;
@@ -854,7 +871,6 @@ fsm_report_lsn(Keeper *keeper)
 	 * call.
 	 */
 	if (!pgsql_get_postgres_metadata(pgsql,
-									 config->replication_slot_name,
 									 &pgSetup->is_in_recovery,
 									 postgres->pgsrSyncState,
 									 postgres->currentLSN))

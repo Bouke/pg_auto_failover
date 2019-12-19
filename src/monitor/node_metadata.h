@@ -117,6 +117,7 @@ extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
 													char *nodeName, int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
+extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId, int groupId,
@@ -147,6 +148,7 @@ extern char *SyncStateToString(SyncState pgsrSyncState);
 extern bool IsCurrentState(AutoFailoverNode *pgAutoFailoverNode,
 						   ReplicationState state);
 extern bool CanTakeWritesInState(ReplicationState state);
+extern bool StateBelongsToPrimary(ReplicationState state);
 extern bool IsBeingPromoted(AutoFailoverNode *node);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);
 extern bool IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode);

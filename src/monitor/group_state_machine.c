@@ -63,11 +63,31 @@ int StartupGracePeriodMs = 10 * 1000;
 bool
 ProceedGroupState(AutoFailoverNode *activeNode)
 {
+	char *formationId = activeNode->formationId;
+	int groupId = activeNode->groupId;
 	AutoFailoverFormation *formation = GetFormation(activeNode->formationId);
-	AutoFailoverNode *primaryNode = NULL;
 
-	List *otherNodesGroupList = NULL;
-	int otherNodesCount = 0;
+	AutoFailoverNode *primaryNode = NULL;
+	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
+	int nodesCount = list_length(nodesGroupList);
+
+	/* when there's no other node anymore, not even one */
+	if (nodesCount == 1
+		&& !IsCurrentState(activeNode, REPLICATION_STATE_SINGLE))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to single as there is no other "
+			"node.",
+			activeNode->nodeName, activeNode->nodePort);
+
+		/* other node may have been removed */
+		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
+
+		return true;
+	}
 
 	/*
 	 * We separate out the FSM for the primary server, because that one needs
@@ -79,15 +99,23 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return ProceedGroupStateForPrimaryNode(activeNode);
 	}
 
-	primaryNode = GetWritableNodeInGroup(activeNode->formationId,
-										 activeNode->groupId);
+	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
 
-	otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
-	otherNodesCount = list_length(otherNodesGroupList);
-
-	if (IsUnhealthy(primaryNode) && otherNodesCount >= 1)
+	if (primaryNode == NULL)
 	{
-		/* Multiple Standby failover is handled in its own function */
+		/* that's a bug, really, maybe we could use an Assert() instead */
+		ereport(ERROR,
+				(errmsg("ProceedGroupState couldn't find the primary node "
+						"in formation \"%s\", group %d",
+						formationId, groupId),
+				 errdetail("activeNode is %s:%d in state %s",
+						   activeNode->nodeName, activeNode->nodePort,
+						   ReplicationStateGetName(activeNode->goalState))));
+	}
+
+	/* Multiple Standby failover is handled in its own function */
+	if (IsUnhealthy(primaryNode) && nodesCount > 2)
+	{
 		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
 
@@ -311,24 +339,6 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 {
 	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 	int otherNodesCount = list_length(otherNodesGroupList);
-
-	/* when there's no other node anymore, not even one */
-	if (otherNodesCount == 0
-		&& !IsCurrentState(primaryNode, REPLICATION_STATE_SINGLE))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of %s:%d to single as there is no other "
-			"node.",
-			primaryNode->nodeName, primaryNode->nodePort);
-
-		/* other node may have been removed */
-		AssignGoalState(primaryNode, REPLICATION_STATE_SINGLE, message);
-
-		return true;
-	}
 
 	/*
 	 * when a first "other" node wants to become standby:

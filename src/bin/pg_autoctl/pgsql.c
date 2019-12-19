@@ -906,8 +906,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * parsePgMetadata parses the result from a PostgreSQL query fetching
- * two columns from pg_stat_replication: sync_state and currentLSN.
+ * parseReplicationSlotMaintain parses the result of the replication slot
+ * queries that return one line per slot maintained.
  */
 static void
 parseReplicationSlotMaintain(void *ctx, PGresult *result)
@@ -1698,8 +1698,7 @@ typedef struct PgMetadata
 
 
 bool
-pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
-							bool *pg_is_in_recovery,
+pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 							char *pgsrSyncState, char *currentLSN)
 {
 	PgMetadata context = { 0 };
@@ -1707,6 +1706,11 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
+		 *
+		 * When on the primary, we might have multiple standby nodes connected.
+		 * We're good when at least one of them is either 'sync' or 'quorum'.
+		 * We don't check individual replication slots, we take the "best" one
+		 * and report that.
 		 */
 		"select pg_is_in_recovery(),"
 		" coalesce(rep.sync_state, '') as sync_state,"
@@ -1717,19 +1721,22 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		" from (values(1)) as dummy"
 		" full outer join"
 		" ("
-		" select sync_state"
-		" from pg_replication_slots slot"
-		" join pg_stat_replication rep"
-		" on rep.pid = slot.active_pid"
-        " where slot_name = $1"
-		" ) as rep"
-		" on true";
+		"   select sync_state"
+		"     from pg_replication_slots slot"
+		"     join pg_stat_replication rep"
+		"       on rep.pid = slot.active_pid"
+		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"order by case sync_state "
+		"         when 'quorum' then 4 "
+		"         when 'sync' then 3 "
+		"         when 'potential' then 2 "
+		"         when 'async' then 1 "
+		"         else 0 end "
+		"    desc limit 1"
+		" ) "
+		"as rep on true";
 
-	const Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1] = { slotName };
-	int paramCount = 1;
-
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 							  &context, &parsePgMetadata);
 
 	if (!context.parsedOk)

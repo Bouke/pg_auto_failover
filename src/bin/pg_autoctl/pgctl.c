@@ -50,9 +50,10 @@ static bool ensure_default_settings_file_exists(const char *configFilePath,
 static void log_program_output(Program prog);
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
-										const char *recoveryConfString);
+										const char *recoveryConfString);;
 static bool prepare_primary_conninfo(char *primaryConnInfo,
 									 int primaryConnInfoSize,
+									 int primaryNodeId,
 									 const char *primaryHost, int primaryPort,
 									 const char *replicationUsername,
 									 const char *replicationPassword);
@@ -95,7 +96,7 @@ pg_ctl_version(const char *pg_ctl_path)
  * Read some of the information from pg_controldata output.
  */
 bool
-pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
+pg_controldata(PostgresSetup *pgSetup, bool verbose)
 {
 	char pg_controldata_path[MAXPGPATH];
 	Program prog;
@@ -122,7 +123,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 					 pg_controldata_path, pgSetup->pgdata);
 			sleep(1);
 
-			return pg_controldata(pgSetup, missing_ok);
+			return pg_controldata(pgSetup, verbose);
 		}
 
 		if (!parse_controldata(&pgSetup->control, prog.stdout))
@@ -138,7 +139,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	}
 	else
 	{
-		if (!missing_ok)
+		if (verbose)
 		{
 			char *errorLines[BUFSIZE];
 			int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
@@ -155,9 +156,9 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 			log_error("Failed to run \"%s\" on \"%s\", see above for details",
 					  pg_controldata_path, pgSetup->pgdata);
 		}
-		free_program(&prog);
 
-		return missing_ok;
+		free_program(&prog);
+		return false;
 	}
 }
 
@@ -580,18 +581,32 @@ log_program_output(Program prog)
 {
 	if (prog.stdout != NULL)
 	{
-		log_info("%s", prog.stdout);
+		char *outLines[BUFSIZE];
+		int lineCount = splitLines(prog.stdout, outLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_info("%s", outLines[lineNumber]);
+		}
 	}
 
 	if (prog.stderr != NULL)
 	{
-		if (prog.returnCode == 0)
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
-			log_info("%s", prog.stderr);
-		}
-		else
-		{
-			log_error("%s", prog.stderr);
+			if (prog.returnCode == 0)
+			{
+				log_info("%s", errorLines[lineNumber]);
+			}
+			else
+			{
+				log_error("%s", prog.stderr);
+			}
 		}
 	}
 }
@@ -936,6 +951,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
+								  primaryNode->nodeId,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
@@ -1082,6 +1098,7 @@ escape_recovery_conf_string(char *destination, int destinationSize,
  */
 static bool
 prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
+						 int primaryNodeId,
 						 const char *primaryHost, int primaryPort,
 						 const char *replicationUsername,
 						 const char *replicationPassword)
@@ -1092,7 +1109,12 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 
 	buffer = createPQExpBuffer();
 
-	appendPQExpBuffer(buffer, "host=%s", primaryHost);
+	/* application_name shows up in pg_stat_replication on the primary */
+	appendPQExpBuffer(buffer,
+					  "application_name = pgautofailover_standby_%d",
+					  primaryNodeId);
+
+	appendPQExpBuffer(buffer, " host=%s", primaryHost);
 	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
