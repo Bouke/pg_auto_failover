@@ -747,9 +747,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		{
 			candidateNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			if (IsHealthy(candidateNode) &&
-				WalDifferenceWithin(candidateNode, primaryNode,
-									PromoteXlogThreshold))
+			if (IsHealthy(candidateNode)
+				&& WalDifferenceWithin(candidateNode,
+									   primaryNode,
+									   PromoteXlogThreshold))
 			{
 				int cPriority = candidateNode->candidatePriority;
 				XLogRecPtr cLSN = candidateNode->reportedLSN;
@@ -758,8 +759,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				{
 					selectedNode = candidateNode;
 				}
-				else if (cPriority == selectedNode->candidatePriority &&
-						 cLSN > selectedNode->reportedLSN)
+				else if (cPriority == selectedNode->candidatePriority
+						 && cLSN > selectedNode->reportedLSN)
 				{
 					selectedNode = candidateNode;
 				}
@@ -816,6 +817,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 							REPLICATION_STATE_WAIT_CASCADE, message);
 
 			return true;
+		}
+		else
+		{
+			/* should we maybe ereport() with an hint? */
+			return false;
 		}
 	}
 
