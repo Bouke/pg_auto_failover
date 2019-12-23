@@ -110,6 +110,10 @@ bool monitor_disable_secondary_for_formation(Monitor *monitor, const char *forma
 bool monitor_drop_formation(Monitor *monitor, char *formation);
 bool monitor_formation_uri(Monitor *monitor, const char *formation,
 						   char *connectionString, size_t size);
+bool monitor_synchronous_standby_names(Monitor *monitor,
+									   char *formation, int groupId,
+									   char *synchronous_standby_names,
+									   int size);
 
 bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
 bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);

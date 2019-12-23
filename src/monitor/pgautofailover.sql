@@ -558,10 +558,10 @@ grant execute on function
  
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
-    IN nodeid				int,
-	IN nodename             text,
-	IN nodeport             int,
-    IN replication_quorum	bool
+    IN nodeid             int,
+    IN nodename           text,
+    IN nodeport           int,
+    IN replication_quorum bool
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$set_node_replication_quorum$$;
@@ -571,4 +571,52 @@ comment on function pgautofailover.set_node_replication_quorum(int, text, int, b
 
 grant execute on function
       pgautofailover.set_node_replication_quorum(int, text, int, bool)
+   to autoctl_node;
+
+
+create function pgautofailover.synchronous_standby_names
+ (
+    IN formation_id text default 'default',
+    IN group_id     int default 0
+ )
+returns text language sql strict
+as $$
+with priorities as
+ (
+   select formationid, groupid, nodeid,
+          format('pgautofailover_standby_%s', nodeid) as appname,
+          candidatepriority,
+          candidatepriority = min(candidatepriority) over w
+      and candidatepriority = max(candidatepriority) over w
+       as allthesame
+     from pgautofailover.node
+    where replicationquorum
+      and node.formationid = synchronous_standby_names.formation_id
+      and node.groupid = synchronous_standby_names.group_id
+   window w as (partition by formationid, groupid)
+ ),
+   sbnames as
+ (
+   select number_sync_standbys,
+          allthesame,
+          string_agg('pgautofailover_standby_' || nodeid, ', '
+                      order by candidatepriority desc, nodeid
+          ) as sbnames
+     from priorities join pgautofailover.formation using(formationid)
+ group by number_sync_standbys, allthesame
+ )
+  select format('%s %s (%s)',
+                case when allthesame then 'any' else 'first' end,
+                number_sync_standbys,
+                sbnames
+         ) as synchronous_standby_names
+    from sbnames
+group by allthesame, number_sync_standbys, sbnames;
+$$;
+
+comment on function pgautofailover.synchronous_standby_names(text, int)
+        is 'get the synchronous_standby_names setting for a given group';
+
+grant execute on function
+      pgautofailover.synchronous_standby_names(text, int)
    to autoctl_node;

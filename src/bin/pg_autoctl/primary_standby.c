@@ -568,7 +568,8 @@ standby_init_database(LocalPostgresServer *postgres,
 					   replicationSource->password,
 					   replicationSource->slotName,
 					   replicationSource->primaryNode.host,
-					   replicationSource->primaryNode.port))
+					   replicationSource->primaryNode.port,
+					   replicationSource->applicationName))
 	{
 		return false;
 	}

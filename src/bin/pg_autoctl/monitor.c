@@ -1761,6 +1761,61 @@ monitor_formation_uri(Monitor *monitor, const char *formation,
 
 
 /*
+ * monitor_synchronous_standby_names returns the value for the Postgres
+ * parameter "synchronous_standby_names" to use for a given group. The setting
+ * is computed on the monitor depending on the current values of the formation
+ * number_sync_standbys and each node's candidate priority and replication
+ * quorum properties.
+ */
+bool
+monitor_synchronous_standby_names(Monitor *monitor,
+								  char *formation, int groupId,
+								  char *synchronous_standby_names, int size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	const char *sql =
+		"select pgautofailover.synchronous_standby_names($1, $2)";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = myGroupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the synchronous_standby_names setting value "
+				  " from the monitor for formation %s and group %d",
+				  formation, groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get the synchronous_standby_names setting value "
+				  " from the monitor for formation %s and group %d,"
+				  "see above for details",
+				  formation, groupId);
+		return false;
+	}
+
+	strlcpy(synchronous_standby_names, context.strVal, size);
+
+	return true;
+}
+
+
+
+/*
  * parseCoordinatorNode parses a hostname and a port from the libpq result and
  * writes it to the NodeAddressParseContext pointed to by ctx. This is about
  * the same as parseNode: the only difference is that an empty result set is
