@@ -165,10 +165,9 @@ keeper_cli_monitor_get_primary_node(int argc, char **argv)
 	}
 
 	/* output something easy to parse by another program */
-	fprintf(stdout,
-			"%s/%d %s:%d\n",
-			config.formation, config.groupId,
-			primaryNode.host, primaryNode.port);
+	(void) printNodeHeader(strlen(primaryNode.host));
+	(void) printNodeEntry(&primaryNode);
+	fprintf(stdout, "\n");
 }
 
 
