@@ -61,6 +61,7 @@ PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
+PG_FUNCTION_INFO_V1(synchronous_standby_names);
 
 /*
  * register_node adds a node to a given formation
@@ -1316,4 +1317,143 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 					  message);
 
 	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * synchronous_standby_names returns the synchronous_standby_names parameter
+ * value for a given Postgres service group in a given formation.
+ */
+Datum
+synchronous_standby_names(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	int32 groupId = PG_GETARG_INT32(1);
+
+	AutoFailoverFormation *formation = GetFormation(formationId);
+
+	AutoFailoverNode *primaryNode = NULL;
+	List *standbyNodesGroupList = NIL;
+
+	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
+	int nodesCount = list_length(nodesGroupList);
+
+	/*
+	 * When there's no nodes registered yet, there's no pg_autoctl process that
+	 * needs the information anyway. Return NULL.
+	 */
+	if (nodesCount == 0)
+	{
+		PG_RETURN_NULL();
+	}
+
+	/* when we have a SINGLE node we disable synchronous replication */
+	if (nodesCount == 1)
+	{
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
+
+	/* when we have more than one node, fetch the primary */
+	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+
+	if (primaryNode == NULL)
+	{
+		/* that's a bug, really, maybe we could use an Assert() instead */
+		ereport(ERROR,
+				(errmsg("Couldn't find the primary node in formation \"%s\", "
+						"group %d", formationId, groupId)));
+	}
+
+	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+
+	/*
+	 * Single standby case
+	 */
+	if (nodesCount == 2)
+	{
+		AutoFailoverNode *secondaryNode = linitial(standbyNodesGroupList);
+
+		if (secondaryNode != NULL
+			&& secondaryNode->replicationQuorum
+			&& IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
+		{
+			/* enable synchronous replication */
+			PG_RETURN_TEXT_P(cstring_to_text("*"));
+		}
+		else
+		{
+			/* disable synchronous replication */
+			PG_RETURN_TEXT_P(cstring_to_text(""));
+		}
+	}
+
+	/*
+	 * General case now, we have multiple standbys each with a candidate
+	 * priority, and with replicationQuorum (bool: true or false).
+	 *
+	 *   - candidateNodesGroupList contains only nodes that have a
+	 *     candidatePriority greater than zero
+	 *
+	 *   - we skip nodes that have replicationQuorum set to false
+	 *
+	 *   - then we build synchronous_standby_names with one of the two
+	 *     following models:
+	 *
+	 *       ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)
+	 *       FIRST 1 (pgautofailover_standby_2, pgautofailover_standby_3)
+	 *
+	 *     We use ANY when all the standby nodes have the same
+	 *     candidatePriority, and we use FIRST otherwise.
+	 *
+	 *     The num_sync number is the formation number_sync_standbys property.
+	 */
+	{
+		List *candidateNodesGroupList =
+			GroupListCandidates(standbyNodesGroupList);
+
+		bool allTheSamePriority =
+			AllNodesHaveSameCandidatePriority(candidateNodesGroupList);
+
+		StringInfo sbnames = makeStringInfo();
+
+		ListCell *nodeCell = NULL;
+		int count = 0;
+
+		appendStringInfo(sbnames,
+						 "%s %d (",
+						 allTheSamePriority ? "ANY" : "FIRST",
+						 formation->number_sync_standbys);
+
+		foreach(nodeCell, candidateNodesGroupList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node->replicationQuorum)
+			{
+				appendStringInfo(sbnames,
+								 "%spgautofailover_standby_%d",
+								 count == 0 ? "" : ", ",
+								 node->nodeId);
+
+				++count;
+			}
+		}
+
+		if (count == 0)
+		{
+			/*
+			 *  If no standby participates in the replication Quorum, we
+			 * disable synchronous replication.
+			 */
+			PG_RETURN_TEXT_P(cstring_to_text(""));
+		}
+		else
+		{
+			appendStringInfoString(sbnames, ")");
+
+			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
+		}
+	}
 }

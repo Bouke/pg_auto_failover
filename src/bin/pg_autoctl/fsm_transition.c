@@ -596,9 +596,39 @@ fsm_promote_standby_to_primary(Keeper *keeper)
 bool
 fsm_enable_sync_rep(Keeper *keeper)
 {
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	return primary_enable_synchronous_replication(postgres);
+	int groupId = keeper->state.current_group;
+	char synchronous_standby_names[BUFSIZE] = { 0 };
+
+	/* get synchronous_standby_names value from the monitor */
+	if (!config->monitorDisabled)
+	{
+		if (!monitor_synchronous_standby_names(
+				monitor,
+				config->formation,
+				groupId,
+				synchronous_standby_names,
+				BUFSIZE))
+		{
+			log_error("Failed to enable synchronous replication because "
+					  "we failed to get the synchronous_standby_names value "
+					  "from the monitor, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* no monitor: use the generic value '*' */
+		strlcpy(synchronous_standby_names, "*", BUFSIZE);
+	}
+
+	return
+		primary_set_synchronous_standby_names(
+			postgres,
+			synchronous_standby_names);
 }
 
 

@@ -579,40 +579,8 @@ create function pgautofailover.synchronous_standby_names
     IN formation_id text default 'default',
     IN group_id     int default 0
  )
-returns text language sql strict
-as $$
-with priorities as
- (
-   select formationid, groupid, nodeid,
-          format('pgautofailover_standby_%s', nodeid) as appname,
-          candidatepriority,
-          candidatepriority = min(candidatepriority) over w
-      and candidatepriority = max(candidatepriority) over w
-       as allthesame
-     from pgautofailover.node
-    where replicationquorum
-      and node.formationid = synchronous_standby_names.formation_id
-      and node.groupid = synchronous_standby_names.group_id
-   window w as (partition by formationid, groupid)
- ),
-   sbnames as
- (
-   select number_sync_standbys,
-          allthesame,
-          string_agg('pgautofailover_standby_' || nodeid, ', '
-                      order by candidatepriority desc, nodeid
-          ) as sbnames
-     from priorities join pgautofailover.formation using(formationid)
- group by number_sync_standbys, allthesame
- )
-  select format('%s %s (%s)',
-                case when allthesame then 'any' else 'first' end,
-                number_sync_standbys,
-                sbnames
-         ) as synchronous_standby_names
-    from sbnames
-group by allthesame, number_sync_standbys, sbnames;
-$$;
+returns text language C strict
+AS 'MODULE_PATHNAME', $$synchronous_standby_names$$;
 
 comment on function pgautofailover.synchronous_standby_names(text, int)
         is 'get the synchronous_standby_names setting for a given group';
