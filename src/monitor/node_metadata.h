@@ -112,6 +112,7 @@ extern List * AutoFailoverOtherNodesListInState(
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern List *GroupListCandidates(List *groupNodeList);
+extern List *GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,

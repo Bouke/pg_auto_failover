@@ -1457,7 +1457,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 	if (primaryNode == NULL)
 	{
-		/* that's a bug, really, maybe we could use an Assert() instead */
+		/* maybe we could use an Assert() instead? */
 		ereport(ERROR,
 				(errmsg("Couldn't find the primary node in formation \"%s\", "
 						"group %d", formationId, groupId)));
@@ -1507,36 +1507,10 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	 *     The num_sync number is the formation number_sync_standbys property.
 	 */
 	{
-		List *candidateNodesGroupList =
-			GroupListCandidates(standbyNodesGroupList);
+		List *syncStandbyNodesGroupList =
+			GroupListSyncStandbys(standbyNodesGroupList);
 
-		bool allTheSamePriority =
-			AllNodesHaveSameCandidatePriority(candidateNodesGroupList);
-
-		StringInfo sbnames = makeStringInfo();
-
-		ListCell *nodeCell = NULL;
-		int count = 0;
-
-		appendStringInfo(sbnames,
-						 "%s %d (",
-						 allTheSamePriority ? "ANY" : "FIRST",
-						 formation->number_sync_standbys);
-
-		foreach(nodeCell, candidateNodesGroupList)
-		{
-			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-			if (node->replicationQuorum)
-			{
-				appendStringInfo(sbnames,
-								 "%spgautofailover_standby_%d",
-								 count == 0 ? "" : ", ",
-								 node->nodeId);
-
-				++count;
-			}
-		}
+		int count = list_length(syncStandbyNodesGroupList);
 
 		if (count == 0)
 		{
@@ -1548,6 +1522,32 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 		}
 		else
 		{
+			bool allTheSamePriority =
+				AllNodesHaveSameCandidatePriority(syncStandbyNodesGroupList);
+
+			StringInfo sbnames = makeStringInfo();
+			ListCell *nodeCell = NULL;
+			bool firstNode = true;
+
+			appendStringInfo(sbnames,
+							 "%s %d (",
+							 allTheSamePriority ? "ANY" : "FIRST",
+							 formation->number_sync_standbys);
+
+			foreach(nodeCell, syncStandbyNodesGroupList)
+			{
+				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+				appendStringInfo(sbnames,
+								 "%spgautofailover_standby_%d",
+								 firstNode ? "" : ", ",
+								 node->nodeId);
+
+				if (firstNode)
+				{
+					firstNode = false;
+				}
+			}
 			appendStringInfoString(sbnames, ")");
 
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));

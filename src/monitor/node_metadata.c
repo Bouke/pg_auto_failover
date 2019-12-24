@@ -400,6 +400,35 @@ GroupListCandidates(List *groupNodeList)
 
 
 /*
+ * GroupListSyncStandbys returns a list of nodes in groupNodeList that are all
+ * candidates for failover (those with AutoFailoverNode.replicationQuorum set
+ * to true), sorted by candidatePriority.
+ */
+List *
+GroupListSyncStandbys(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	List *syncStandbyNodesList = NIL;
+	List *sortedNodeList =
+		list_qsort(groupNodeList,
+				   pgautofailover_node_candidate_priority_compare);
+
+	foreach(nodeCell, sortedNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum)
+		{
+			syncStandbyNodesList = lappend(syncStandbyNodesList, node);
+		}
+	}
+	list_free(sortedNodeList);
+
+	return syncStandbyNodesList;
+}
+
+
+/*
  * AllNodesHaveSameCandidatePriority returns true when all the nodes in the
  * given list have the same candidate priority.
  */
