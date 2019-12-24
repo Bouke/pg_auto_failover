@@ -38,9 +38,7 @@
 #include "primary_standby.h"
 #include "state.h"
 
-static bool prepare_replication(Keeper *keeper,
-								NodeState otherNodeState,
-								bool otherNodeMissingIsOk);
+static bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
 
 
 /*
@@ -378,7 +376,6 @@ bool
 fsm_prepare_replication(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	bool otherNodeMissingIsOk = false;
 
 	if (IS_EMPTY_STRING_BUFFER(config->nodename))
 	{
@@ -388,7 +385,7 @@ fsm_prepare_replication(Keeper *keeper)
 		return false;
 	}
 
-	return prepare_replication(keeper, WAIT_STANDBY_STATE, otherNodeMissingIsOk);
+	return prepare_replication(keeper, WAIT_STANDBY_STATE);
 }
 
 
@@ -399,8 +396,7 @@ fsm_prepare_replication(Keeper *keeper)
  * transition after all.
  */
 static bool
-prepare_replication(Keeper *keeper,
-					NodeState otherNodeState, bool otherNodeMissingIsOk)
+prepare_replication(Keeper *keeper, NodeState otherNodeState)
 {
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
@@ -430,23 +426,22 @@ prepare_replication(Keeper *keeper,
 
 		if (keeper->otherNodes.count == 0)
 		{
-			int logLevel = otherNodeMissingIsOk ? LOG_WARN : LOG_ERROR;
-
 			if (otherNodeState == ANY_STATE)
 			{
-				log_at_level(logLevel,
-							 "There's no other node for %s:%d", host, port);
+				log_warn("There's no other node for %s:%d", host, port);
 			}
 			else
 			{
-				log_at_level(logLevel,
-							 "There's no other node in state \"%s\" "
-							 "for node %s:%d",
-							 NodeStateToString(otherNodeState),
-							 host, port);
+				/*
+				 * Should we warn about it really? it might be a replication
+				 * setting change that will impact synchronous_standby_names
+				 * and that's all.
+				 */
+				log_warn("There's no other node in state \"%s\" "
+						 "for node %s:%d",
+						 NodeStateToString(otherNodeState),
+						 host, port);
 			}
-
-			return otherNodeMissingIsOk;
 		}
 	}
 
@@ -854,7 +849,6 @@ bool
 fsm_promote_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	bool otherNodeMissingIsOk = true;
 
 	if (!ensure_local_postgres_is_running(postgres))
 	{
@@ -881,7 +875,7 @@ fsm_promote_standby(Keeper *keeper)
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in prepare_replication.
 	 */
-	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE, otherNodeMissingIsOk))
+	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;

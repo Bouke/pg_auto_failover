@@ -1209,8 +1209,12 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	int candidatePriority = PG_GETARG_INT32(3);
-	AutoFailoverNode *currentNode = NULL;
+
 	char message[BUFSIZE];
+
+	AutoFailoverNode *currentNode = NULL;
+	List *nodesGroupList = NIL;
+	int nodesCount = 0;
 
 	checkPgAutoFailoverVersion();
 
@@ -1223,6 +1227,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
+
+	nodesGroupList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+	nodesCount = list_length(nodesGroupList);
 
 	if (candidatePriority < 0 || candidatePriority > 100)
 	{
@@ -1243,9 +1251,49 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			currentNode->candidatePriority,
 			currentNode->replicationQuorum);
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Updating candidatePriority.");
+	if (nodesCount == 1)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating candidate priority to %d for node %s:%d",
+			currentNode->candidatePriority,
+			currentNode->nodeName,
+			currentNode->nodePort);
+	}
+	else if (nodesCount == 2)
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to wait_primary "
+			"after updating candidate priority to %d for node %s:%d.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->candidatePriority,
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_WAIT_PRIMARY);
+	}
+	else
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to join_primary "
+			"after updating candidate priority to %d for node %s:%d.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->candidatePriority,
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_JOIN_PRIMARY);
+	}
 
 	NotifyStateChange(currentNode->reportedState,
 					  currentNode->goalState,
@@ -1275,8 +1323,12 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	bool replicationQuorum = PG_GETARG_BOOL(3);
-	AutoFailoverNode *currentNode = NULL;
+
 	char message[BUFSIZE];
+
+	AutoFailoverNode *currentNode = NULL;
+	List *nodesGroupList = NIL;
+	int nodesCount = 0;
 
 	checkPgAutoFailoverVersion();
 
@@ -1290,8 +1342,11 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	currentNode->replicationQuorum = replicationQuorum;
+	nodesGroupList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+	nodesCount = list_length(nodesGroupList);
 
+	currentNode->replicationQuorum = replicationQuorum;
 
 	ReportAutoFailoverNodeReplicationSetting(currentNode->nodeId,
 			currentNode->nodeName,
@@ -1299,9 +1354,49 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			currentNode->candidatePriority,
 			currentNode->replicationQuorum);
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Updating replicationQuorum.");
+	if (nodesCount == 1)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating replicationQuorum to %s for node %s:%d",
+			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeName,
+			currentNode->nodePort);
+	}
+	else if (nodesCount == 2)
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to wait_primary "
+			"after updating replication quorum to %s for node %s:%d.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_WAIT_PRIMARY);
+	}
+	else
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to join_primary "
+			"after updating replication quorum to %s for node %s:%d.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_JOIN_PRIMARY);
+	}
 
 	NotifyStateChange(currentNode->reportedState,
 					  currentNode->goalState,
@@ -1339,6 +1434,8 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
 	int nodesCount = list_length(nodesGroupList);
+
+	checkPgAutoFailoverVersion();
 
 	/*
 	 * When there's no nodes registered yet, there's no pg_autoctl process that

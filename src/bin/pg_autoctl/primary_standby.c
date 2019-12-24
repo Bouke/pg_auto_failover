@@ -322,7 +322,8 @@ primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
 	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
-	log_trace("primary_set_synchronous_standby_names");
+	log_info("Setting synchronous_standby_names to '%s'",
+			 synchronous_standby_names);
 
 	result =
 		pgsql_set_synchronous_standby_names(pgsql, synchronous_standby_names);

@@ -484,8 +484,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 								REPLICATION_STATE_CATCHINGUP, message);
 
 			}
-			else if (!otherNode->replicationQuorum
-					 || otherNode->candidatePriority == 0)
+			else if (otherNode->candidatePriority == 0)
 			{
 				/* also not a candidate */
 				--failoverCandidateCount;
@@ -505,6 +504,48 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				AssignGoalState(primaryNode,
 								REPLICATION_STATE_WAIT_PRIMARY, message);
 			}
+		}
+
+		return true;
+	}
+
+	/*
+	 * when a node has changed its replication settings:
+	 *     wait_primary ➜ primary
+	 *     join_primary ➜ primary
+	 *
+	 * If all the standby nodes are in SECONDARY state already, then it was a
+	 * settings change, so just move forward. Settings change needs to be
+	 * reflected on the primary's synchronous_standby_names value.
+	 */
+	if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
+	{
+		bool allStandbyNodesAreInSecondaryState = true;
+		ListCell *nodeCell = NULL;
+
+		foreach(nodeCell, otherNodesGroupList)
+		{
+			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
+			{
+				allStandbyNodesAreInSecondaryState = false;
+				break;
+			}
+		}
+
+		if (allStandbyNodesAreInSecondaryState)
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to primary "
+				"after it applied replication properties change.",
+				primaryNode->nodeName, primaryNode->nodePort);
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 		}
 
 		return true;
