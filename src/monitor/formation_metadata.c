@@ -18,6 +18,7 @@
 #include "health_check.h"
 #include "metadata.h"
 #include "formation_metadata.h"
+#include "node_metadata.h"
 
 #include "access/htup_details.h"
 #include "access/xlogdefs.h"
@@ -513,15 +514,15 @@ IsCitusFormation(AutoFailoverFormation *formation)
 }
 
 /*
- * set_formation_number_sync_standbys sets number_sync_standbys property of a formation.
- * The function returns true on success.
+ * set_formation_number_sync_standbys sets number_sync_standbys property of a
+ * formation. The function returns true on success.
  */
 Datum
 set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 {
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
-	int number_sync_standbys = -1;
+	int number_sync_standbys = PG_GETARG_INT32(1);
 	AutoFailoverFormation *formation = 	GetFormation(formationId);
 	bool success = false;
 
@@ -531,19 +532,93 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 						errmsg("unknown formation \"%s\"", formationId)));
 	}
 
-
-	number_sync_standbys = PG_GETARG_INT32(1);
+	LockFormation(formationId, ExclusiveLock);
 
 	if (number_sync_standbys < 0)
 	{
-		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
-						errmsg("invalid value for  number_sync_standbys \"%d\" "
-							   "expected a non-negative integer", number_sync_standbys)));
+		ereport(ERROR,
+				(ERRCODE_INVALID_PARAMETER_VALUE,
+				 errmsg("invalid value for number_sync_standbys: \"%d\"",
+						number_sync_standbys),
+				 errdetail("A non-negative integer is expected")));
+	}
+
+	/*
+	 * number_sync_standbys = 1 is a special case in our FSM, because we have
+	 * special handling of a missing standby them
+	 *
+	 * For other values (N) of number_sync_standbys, we require N+1 known
+	 * standby nodes, so that you can lose a standby at any point in time and
+	 * still accept writes. That's the service availability trade-off and cost.
+	 */
+	if (number_sync_standbys > 1)
+	{
+		/* at the moment, only test with the number of standbys in group 0 */
+		int groupId = 0;
+		int standbyCount = 0;
+
+		bool valid =
+			FormationNumSyncStandbyIsValid(formation, groupId, &standbyCount);
+
+		if (!valid)
+		{
+			ereport(ERROR,
+					(ERRCODE_INVALID_PARAMETER_VALUE,
+					 errmsg("invalid value for number_sync_standbys: \"%d\"",
+							number_sync_standbys),
+					 errdetail("At least %d standby nodes are required, "
+							   "and only %d are currently participating in "
+							   "the replication quorum",
+							   number_sync_standbys + 1, standbyCount)));
+		}
 	}
 
 	success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
 
 	PG_RETURN_BOOL(success);
+}
+
+
+/*
+ * FormationNumSyncStandbyIsValid returns true if the current setting for
+ * number_sync_standbys on the given formation makes sense with the registered
+ * standbys.
+ */
+bool
+FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
+							   int groupId,
+							   int *standbyCount)
+{
+	AutoFailoverNode *primaryNode =
+		GetPrimaryNodeInGroup(formation->formationId, groupId);
+
+	ListCell *nodeCell = NULL;
+	List *standbyNodesGroupList = NIL;
+	int count = 0;
+
+	if (primaryNode == NULL)
+	{
+		/* maybe we could use an Assert() instead? */
+		ereport(ERROR,
+				(errmsg("Couldn't find the primary node in formation \"%s\", "
+						"group %d", formation->formationId, groupId)));
+	}
+
+	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+
+	foreach(nodeCell, standbyNodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum)
+		{
+			++count;
+		}
+	}
+
+	*standbyCount = count;
+
+	return (formation->number_sync_standbys + 1) <= count;
 }
 
 

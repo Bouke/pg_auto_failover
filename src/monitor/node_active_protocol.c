@@ -15,6 +15,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "access/xact.h"
 
 #include "formation_metadata.h"
 #include "group_state_machine.h"
@@ -1353,6 +1354,37 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			currentNode->nodePort,
 			currentNode->candidatePriority,
 			currentNode->replicationQuorum);
+
+	/* we need to see the result of that operation in the next query */
+	CommandCounterIncrement();
+
+	/* it's not always possible to opt-out from replication-quorum */
+	if (!currentNode->replicationQuorum)
+	{
+		AutoFailoverFormation *formation =
+			GetFormation(currentNode->formationId);
+
+		int standbyCount = 0;
+		bool formationIsStillValid =
+			FormationNumSyncStandbyIsValid(formation,
+										   currentNode->groupId,
+										   &standbyCount);
+
+		if (!formationIsStillValid)
+		{
+			ereport(ERROR,
+					(ERRCODE_INVALID_PARAMETER_VALUE,
+					 errmsg("can't set replication quorum to false"),
+					 errdetail("At least %d standby nodes are required "
+							   "in formation %s with number_sync_standbys = %d, "
+							   "and only %d would be participating in "
+							   "the replication quorum",
+							   formation->number_sync_standbys + 1,
+							   formation->formationId,
+							   formation->number_sync_standbys,
+							   standbyCount)));
+		}
+	}
 
 	if (nodesCount == 1)
 	{

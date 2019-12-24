@@ -62,6 +62,10 @@ extern void SetFormationDBName(const char *formationId, const char *dbname);
 extern void SetFormationOptSecondary(const char *formationId, bool optSecondary);
 extern bool IsCitusFormation(AutoFailoverFormation *formation);
 
+extern bool FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
+										   int groupId,
+										   int *standbyCount);
+
 extern FormationKind FormationKindFromString(const char *kind);
 extern char *FormationKindToString(FormationKind kind);
 extern FormationKind FormationKindFromNodeKindString(const char *nodeKind);
