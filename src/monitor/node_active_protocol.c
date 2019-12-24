@@ -1364,13 +1364,24 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 		AutoFailoverFormation *formation =
 			GetFormation(currentNode->formationId);
 
-		int standbyCount = 0;
-		bool formationIsStillValid =
-			FormationNumSyncStandbyIsValid(formation,
-										   currentNode->groupId,
-										   &standbyCount);
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(formation->formationId, currentNode->groupId);
 
-		if (!formationIsStillValid)
+		int standbyCount = 0;
+
+		if (primaryNode == NULL)
+		{
+			/* maybe we could use an Assert() instead? */
+			ereport(ERROR,
+					(errmsg("Couldn't find the primary node in "
+							"formation \"%s\", group %d",
+							formation->formationId, currentNode->groupId)));
+		}
+
+		if (!FormationNumSyncStandbyIsValid(formation,
+										   primaryNode,
+										   currentNode->groupId,
+										   &standbyCount))
 		{
 			ereport(ERROR,
 					(ERRCODE_INVALID_PARAMETER_VALUE,

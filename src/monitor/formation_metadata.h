@@ -16,6 +16,7 @@
 #include "datatype/timestamp.h"
 
 #include "health_check.h"
+#include "node_metadata.h"
 #include "replication_state.h"
 
 #define AUTO_FAILOVER_FORMATION_TABLE_NAME "formation"
@@ -63,6 +64,7 @@ extern void SetFormationOptSecondary(const char *formationId, bool optSecondary)
 extern bool IsCitusFormation(AutoFailoverFormation *formation);
 
 extern bool FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
+										   AutoFailoverNode *primaryNode,
 										   int groupId,
 										   int *standbyCount);
 
