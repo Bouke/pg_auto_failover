@@ -172,8 +172,8 @@ keeper_cli_monitor_get_primary_node(int argc, char **argv)
 
 
 /*
- * keeper_cli_monitor_state_getopts parses the command line options for the
- * command `pg_autoctl show state`.
+ * cli_do_monitor_get_other_nodes_getopts parses the command line options for
+ * the command `pg_autoctl show nodes`.
  */
 static int
 cli_do_monitor_get_other_nodes_getopts(int argc, char **argv)
@@ -317,8 +317,6 @@ cli_do_monitor_get_other_nodes_getopts(int argc, char **argv)
 /*
  * keeper_cli_monitor_get_other_nodes contacts the pg_auto_failover monitor and
  * retrieves the "other node" information for given nodename and port.
- *
- * TODO: add a --json output, an array of NodeAddress objects.
  */
 static void
 keeper_cli_monitor_get_other_nodes(int argc, char **argv)
